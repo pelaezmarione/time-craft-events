@@ -1,5 +1,5 @@
 
-import { executeQuery } from '../lib/db';
+import { executeQuery, User } from '../lib/db';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 
