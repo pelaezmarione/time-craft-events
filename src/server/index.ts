@@ -113,6 +113,177 @@ app.get('/api/events/:userId', async (req, res) => {
   }
 });
 
+// Get events by date range
+app.get('/api/events/:userId/range', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const { start, end } = req.query;
+    
+    const events = await query(
+      `SELECT e.*, c.time_remaining AS countdown FROM event e
+       LEFT JOIN countdown c ON e.event_id = c.event_id
+       WHERE e.user_id = ? AND 
+       ((e.start_time >= ? AND e.start_time <= ?) OR
+        (e.end_time >= ? AND e.end_time <= ?) OR
+        (e.start_time <= ? AND e.end_time >= ?))
+       ORDER BY e.start_time ASC`,
+      [userId, start, end, start, end, start, end]
+    );
+    
+    res.json({ success: true, events });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Create a new event
+app.post('/api/events', async (req, res) => {
+  try {
+    const { 
+      user_id, 
+      event_type, 
+      title, 
+      description, 
+      start_time, 
+      end_time, 
+      location, 
+      category, 
+      priority, 
+      color_code, 
+      tags,
+      event_status = 'active'
+    } = req.body;
+    
+    const result = await query(
+      `INSERT INTO event (
+        user_id, event_type, title, description, start_time, end_time, 
+        location, category, priority, color_code, tags, event_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        user_id, 
+        event_type, 
+        title, 
+        description, 
+        start_time, 
+        end_time, 
+        location, 
+        category, 
+        priority, 
+        color_code, 
+        tags,
+        event_status
+      ]
+    );
+    
+    const insertId = (result as any).insertId;
+    
+    res.status(201).json({ 
+      success: true, 
+      message: 'Event created successfully', 
+      eventId: insertId 
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Update an event
+app.put('/api/events/:eventId', async (req, res) => {
+  try {
+    const eventId = req.params.eventId;
+    const { userId, ...updateData } = req.body;
+    
+    // Build the dynamic update query
+    let updateFields = [];
+    let queryParams = [];
+    
+    for (const [key, value] of Object.entries(updateData)) {
+      updateFields.push(`${key} = ?`);
+      queryParams.push(value);
+    }
+    
+    // Add the WHERE conditions at the end
+    queryParams.push(eventId);
+    queryParams.push(userId);
+    
+    const result = await query(
+      `UPDATE event SET ${updateFields.join(', ')} WHERE event_id = ? AND user_id = ?`,
+      queryParams
+    );
+    
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Event not found or you do not have permission to update it' 
+      });
+    }
+    
+    res.json({ success: true, message: 'Event updated successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Delete an event
+app.delete('/api/events/:eventId', async (req, res) => {
+  try {
+    const eventId = req.params.eventId;
+    const userId = req.query.userId as string;
+    
+    const result = await query(
+      'DELETE FROM event WHERE event_id = ? AND user_id = ?',
+      [eventId, userId]
+    );
+    
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Event not found or you do not have permission to delete it' 
+      });
+    }
+    
+    res.json({ success: true, message: 'Event deleted successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Create event summary
+app.post('/api/events/:eventId/summary', async (req, res) => {
+  try {
+    const eventId = req.params.eventId;
+    const { userId, summaryText } = req.body;
+    
+    // Check if event belongs to user
+    const events = await query(
+      'SELECT * FROM event WHERE event_id = ? AND user_id = ?',
+      [eventId, userId]
+    ) as any[];
+    
+    if (events.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Event not found or you do not have permission' 
+      });
+    }
+    
+    // Insert summary
+    await query(
+      'INSERT INTO event_summary (event_id, summary_text) VALUES (?, ?)',
+      [eventId, summaryText]
+    );
+    
+    res.status(201).json({ success: true, message: 'Summary added successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
