@@ -1,7 +1,8 @@
 
-import { executeQuery, User } from '../lib/db';
 import { z } from 'zod';
-import bcrypt from 'bcryptjs';
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const UserSchema = z.object({
   first_name: z.string().min(1, "First name is required"),
@@ -19,79 +20,27 @@ export async function createUser(userData: UserData) {
   try {
     const validatedData = UserSchema.parse(userData);
     
-    // Check if username or email already exists
-    const existingUser = await executeQuery(
-      'SELECT * FROM user WHERE username = ? OR user_email = ?',
-      [validatedData.username, validatedData.user_email]
-    ) as any[];
-    
-    if (existingUser.length > 0) {
-      throw new Error('Username or email already exists');
-    }
-    
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(validatedData.password, salt);
-    
-    // Insert user into database
-    const result = await executeQuery(
-      `INSERT INTO user (last_name, first_name, middle_initial, username, user_email, phone_number, password) 
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        validatedData.last_name,
-        validatedData.first_name,
-        validatedData.middle_initial || '',
-        validatedData.username,
-        validatedData.user_email,
-        validatedData.phone_number,
-        hashedPassword
-      ]
-    );
-    
-    return { success: true, message: 'User created successfully' };
-  } catch (error) {
+    const response = await axios.post(`${API_URL}/auth/register`, validatedData);
+    return response.data;
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
       return { success: false, message: error.errors[0].message };
     }
-    return { success: false, message: (error as Error).message || 'Failed to create user' };
+    if (error.response) {
+      return { success: false, message: error.response.data.message || 'Failed to create user' };
+    }
+    return { success: false, message: 'Failed to connect to server' };
   }
 }
 
 export async function loginUser(username: string, password: string) {
   try {
-    // Find user by username or email
-    const users = await executeQuery(
-      'SELECT * FROM user WHERE username = ? OR user_email = ?',
-      [username, username]
-    ) as any[];
-    
-    if (users.length === 0) {
-      return { success: false, message: 'Invalid credentials' };
+    const response = await axios.post(`${API_URL}/auth/login`, { username, password });
+    return response.data;
+  } catch (error: any) {
+    if (error.response) {
+      return { success: false, message: error.response.data.message || 'Login failed' };
     }
-    
-    const user = users[0];
-    
-    // Compare password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return { success: false, message: 'Invalid credentials' };
-    }
-    
-    // Don't include password in the returned user object
-    delete user.password;
-    
-    return { 
-      success: true, 
-      message: 'Login successful', 
-      user: {
-        user_id: user.user_id,
-        username: user.username,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        user_email: user.user_email
-      } 
-    };
-  } catch (error) {
-    return { success: false, message: 'Login failed' };
+    return { success: false, message: 'Failed to connect to server' };
   }
 }
